@@ -1,0 +1,16 @@
+{
+  "name": "yt-downloader",
+  "version": "1.1.0",
+  "description": "YouTube video + Shorts downloader (yt-dlp + ffmpeg, auto setup)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ffmpeg-static": "^5.2.0"
+  }
+}

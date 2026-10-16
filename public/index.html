@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>YT Downloader – Videos & Shorts</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <main class="max-w-2xl mx-auto px-4 py-12">
+    <h1 class="text-3xl md:text-4xl font-bold text-center">
+      <span class="text-red-500">YouTube</span> Downloader
+    </h1>
+    <p class="text-center text-slate-400 mt-2">Videos & Shorts · MP4 (up to 4K) · MP3</p>
+
+    <form id="form" class="mt-8 flex flex-col sm:flex-row gap-3">
+      <input id="url" type="url" required placeholder="YouTube video ya Shorts link paste karo"
+        class="flex-1 rounded-xl bg-slate-900 border border-slate-700 px-4 py-3 outline-none focus:border-red-500" />
+      <button id="fetchBtn" class="rounded-xl bg-red-600 hover:bg-red-500 px-6 py-3 font-semibold disabled:opacity-50">
+        Fetch
+      </button>
+    </form>
+
+    <p id="msg" class="mt-4 text-center text-sm"></p>
+
+    <section id="result" class="hidden mt-8 rounded-2xl bg-slate-900 border border-slate-800 overflow-hidden">
+      <div class="flex flex-col sm:flex-row gap-4 p-4">
+        <img id="thumb" class="w-full sm:w-48 rounded-lg object-cover aspect-video" alt="" />
+        <div class="flex-1 min-w-0">
+          <span id="badge" class="hidden text-xs bg-red-600 rounded px-2 py-0.5">SHORTS</span>
+          <h2 id="title" class="font-semibold mt-1 line-clamp-2"></h2>
+          <p id="meta" class="text-sm text-slate-400 mt-1"></p>
+        </div>
+      </div>
+      <div class="border-t border-slate-800 p-4">
+        <label class="text-sm text-slate-400" for="quality">Quality</label>
+        <div class="mt-2 flex flex-col sm:flex-row gap-3">
+          <select id="quality" class="flex-1 rounded-xl bg-slate-800 border border-slate-700 px-4 py-3 outline-none focus:border-red-500"></select>
+          <button id="dlBtn" class="rounded-xl bg-green-600 hover:bg-green-500 px-8 py-3 font-bold text-lg disabled:opacity-50">
+            ⬇ Download
+          </button>
+        </div>
+        <div id="progWrap" class="hidden mt-4">
+          <div class="h-2 rounded-full bg-slate-800 overflow-hidden">
+            <div id="prog" class="h-full bg-green-500 transition-all" style="width:0%"></div>
+          </div>
+          <p id="progText" class="text-xs text-slate-400 mt-2"></p>
+        </div>
+      </div>
+    </section>
+
+    <p class="text-xs text-slate-500 text-center mt-10">
+      Sirf apna ya permission wala content download karo.
+    </p>
+  </main>
+
+<script>
+const $ = id => document.getElementById(id);
+let currentUrl = '';
+
+function msg(t, err) {
+  $('msg').textContent = t;
+  $('msg').className = 'mt-4 text-center text-sm ' + (err ? 'text-red-400' : 'text-slate-300');
+}
+const fmtTime = s => s ? `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}` : '';
+
+$('form').onsubmit = async e => {
+  e.preventDefault();
+  currentUrl = $('url').value.trim();
+  $('fetchBtn').disabled = true;
+  $('result').classList.add('hidden');
+  msg('Fetching info...');
+  try {
+    const r = await fetch('/api/info?url=' + encodeURIComponent(currentUrl));
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    $('thumb').src = d.thumbnail;
+    $('title').textContent = d.title;
+    $('meta').textContent = [d.channel, fmtTime(d.duration)].filter(Boolean).join(' · ');
+    $('badge').classList.toggle('hidden', !d.isShort);
+    const qs = d.qualities.length ? d.qualities : [720];
+    const def = qs.includes(720) ? 720 : qs[0];
+    $('quality').innerHTML =
+      qs.map(h => `<option value="mp4:${h}" ${h === def ? 'selected' : ''}>🎬 MP4 ${h}p${h >= 2160 ? ' (4K)' : h >= 1080 ? ' (HD)' : ''}</option>`).join('') +
+      `<option value="mp3:0">🎵 MP3 Audio</option>`;
+    $('progWrap').classList.add('hidden');
+    $('result').classList.remove('hidden');
+    msg('');
+  } catch (err) { msg(err.message || 'Error', true); }
+  $('fetchBtn').disabled = false;
+};
+
+function setProg(pct, text) {
+  $('progWrap').classList.remove('hidden');
+  $('prog').style.width = pct + '%';
+  $('progText').textContent = text;
+}
+
+$('dlBtn').onclick = async () => {
+  const [type, q] = $('quality').value.split(':');
+  $('dlBtn').disabled = true; $('fetchBtn').disabled = true;
+  msg('');
+  // server processing stage (fake creep so user sees activity)
+  let p = 0;
+  setProg(0, 'Server par video taiyar ho raha hai... (bade video me 1-2 min)');
+  const creep = setInterval(() => { p = Math.min(p + (60 - p) * 0.05, 59); $('prog').style.width = p + '%'; }, 500);
+  try {
+    const r = await fetch('/api/download?' + new URLSearchParams({ url: currentUrl, type, q }));
+    clearInterval(creep);
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Download failed');
+    const cd = r.headers.get('content-disposition') || '';
+    const name = decodeURIComponent((cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)/) || [])[1] || 'video.' + type);
+    const total = +r.headers.get('content-length') || 0;
+    const reader = r.body.getReader();
+    const chunks = []; let got = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value); got += value.length;
+      const mb = (got / 1048576).toFixed(1);
+      setProg(total ? 60 + (got / total) * 40 : 80, total ? `Downloading ${mb} / ${(total / 1048576).toFixed(1)} MB` : `Downloading ${mb} MB`);
+    }
+    const blob = new Blob(chunks, { type: type === 'mp3' ? 'audio/mpeg' : 'video/mp4' });
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    setProg(100, 'Download complete ✓  ' + name);
+  } catch (err) {
+    clearInterval(creep);
+    $('progWrap').classList.add('hidden');
+    msg(err.message || 'Download failed', true);
+  }
+  $('dlBtn').disabled = false; $('fetchBtn').disabled = false;
+};
+</script>
+</body>
+</html>
